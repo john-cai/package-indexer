@@ -14,18 +14,46 @@ const (
 
 // PackageStore is the interface for storing packages
 type PackageStore interface {
-	Get(string) *Package
-	Delete(string) bool
-	Put(*Package) bool
+	Get(string) (*Package, bool)
+	Delete(string)
+	Put(*Package)
+	Size() int
+}
+
+type mapStore struct {
+	m map[string]*Package
+}
+
+func (m *mapStore) Get(p string) (*Package, bool) {
+	pkg, ok := m.m[p]
+	return pkg, ok
+}
+
+func (m *mapStore) Delete(p string) {
+	delete(m.m, p)
+}
+
+func (m *mapStore) Put(p *Package) {
+	m.m[p.name] = p
+}
+
+func (m *mapStore) Size() int {
+	return len(m.m)
+}
+
+func NewMapStore() *mapStore {
+	return &mapStore{
+		m: make(map[string]*Package),
+	}
 }
 
 func (p *PackageIndexer) Add(name string, pkg *Package) bool {
 	p.m.Lock()
 	defer p.m.Unlock()
-	if _, ok := p.store[name]; ok {
-		return ok
+	if _, ok := p.store.Get(name); ok {
+		return true
 	}
-	p.store[name] = pkg
+	p.store.Put(pkg)
 	p.addDependents(mapKeys(pkg.dependencies), name)
 	return true
 }
@@ -33,22 +61,24 @@ func (p *PackageIndexer) Add(name string, pkg *Package) bool {
 func (p *PackageIndexer) Get(name string) (*Package, bool) {
 	p.m.RLock()
 	defer p.m.RUnlock()
-	pkg, ok := p.store[name]
+	var ok bool
+	pkg, ok := p.store.Get(name)
 	return pkg, ok
 }
 
 func (p *PackageIndexer) Remove(name string) bool {
 	p.m.Lock()
 	defer p.m.Unlock()
-	if _, ok := p.store[name]; !ok {
+	pkg, ok := p.store.Get(name)
+	if !ok {
 		return true
 	}
 	//check dependents
-	pkg, _ := p.store[name]
+
 	if p.find(mapKeys(pkg.dependents)...) {
 		return false
 	}
-	delete(p.store, name)
+	p.store.Delete(name)
 	p.removeDependents(mapKeys(pkg.dependencies), name)
 	return true
 }
@@ -75,7 +105,7 @@ func main() {
 	p := &PackageIndexer{
 		conChan: make(chan net.Conn, 10),
 		m:       &sync.RWMutex{},
-		store:   make(map[string]*Package),
+		store:   NewMapStore(),
 	}
 	p.listenAndServe()
 }
@@ -83,7 +113,7 @@ func main() {
 type PackageIndexer struct {
 	m       *sync.RWMutex
 	conChan chan net.Conn
-	store   map[string]*Package
+	store   PackageStore
 }
 
 func (p *PackageIndexer) listenAndServe() {
@@ -197,9 +227,9 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 
 func (p *PackageIndexer) addDependents(packages []string, dependent string) {
 	for _, pkg := range packages {
-		currentPackage, ok := p.store[pkg]
+		currentPackage, ok := p.store.Get(pkg)
 		if !ok {
-			//something went very wrong
+
 		}
 		currentPackage.dependents[dependent] = struct{}{}
 	}
@@ -207,7 +237,7 @@ func (p *PackageIndexer) addDependents(packages []string, dependent string) {
 
 func (p *PackageIndexer) removeDependents(packages []string, dependent string) {
 	for _, dep := range packages {
-		pkg, ok := p.store[dep]
+		pkg, ok := p.store.Get(dep)
 		if !ok {
 			//something went very wrong
 		}
@@ -219,11 +249,11 @@ func (p *PackageIndexer) find(pkgs ...string) bool {
 	if len(pkgs) == 0 {
 		return false
 	}
-	if len(p.store) == 0 {
+	if p.store.Size() == 0 {
 		return false
 	}
 	for _, pkg := range pkgs {
-		if _, ok := p.store[pkg]; !ok {
+		if _, ok := p.store.Get(pkg); !ok {
 			return false
 		}
 	}
