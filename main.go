@@ -14,10 +14,9 @@ const (
 
 // PackageStore is the interface for storing packages
 type PackageStore interface {
-	/*	Add(string, *Package) bool
-		Get(string) (*Package, bool)
-		Remove(string) bool*/
-	find(...string) bool
+	Get(string) *Package
+	Delete(string) bool
+	Put(*Package) bool
 }
 
 func (p *PackageIndexer) Add(name string, pkg *Package) bool {
@@ -52,6 +51,12 @@ func (p *PackageIndexer) Remove(name string) bool {
 	delete(p.store, name)
 	p.removeDependents(mapKeys(pkg.dependencies), name)
 	return true
+}
+
+func (p *PackageIndexer) Query(name string) bool {
+	p.m.RLock()
+	defer p.m.RUnlock()
+	return p.find(name)
 }
 
 type Package struct {
@@ -148,7 +153,7 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 		}
 
 		if Request.command == "QUERY" {
-			if p.find(Request.pkg) {
+			if p.Query(Request.pkg) {
 				_, err := conn.Write([]byte("OK\n"))
 				if err != nil {
 					//TODO something
