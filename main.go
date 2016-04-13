@@ -7,7 +7,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 )
 
 const (
@@ -84,7 +83,6 @@ func main() {
 	p := &PackageIndexer{
 		store:   NewMapStore(),
 		conChan: make(chan net.Conn, 10),
-		reqChan: make(chan string),
 	}
 	p.listenAndServe()
 }
@@ -92,7 +90,6 @@ func main() {
 type PackageIndexer struct {
 	store   PackageStore
 	conChan chan net.Conn
-	reqChan chan string
 }
 
 //TODO rate limit
@@ -107,7 +104,7 @@ func (p *PackageIndexer) listenAndServe() {
 		for {
 			conn := <-p.conChan
 			fmt.Println("pulled off of the channel")
-			go p.receiveRequest(conn)
+			go p.handleRequest(conn)
 		}
 	}()
 
@@ -140,89 +137,76 @@ func mapKeys(m map[string]interface{}) []string {
 	return s
 }
 
-func (p *PackageIndexer) handleRequest(conn net.Conn, timer *time.Timer) {
+func (p *PackageIndexer) handleRequest(conn net.Conn) {
 	for {
-		select {
-		case request := <-p.reqChan:
-			Request, success := parseRequestString(request)
+		request, _ := bufio.NewReader(conn).ReadString('\n')
 
-			if !success {
-				conn.Write([]byte(ResponseError + "\n"))
-				continue
-			}
+		Request, success := parseRequestString(request)
 
-			if Request.command == "INDEX" {
-				if len(Request.dependencies) > 0 && !p.store.find(Request.dependencies...) {
-					//could not find all dependencies
-					conn.Write([]byte("FAIL\n"))
-					continue
-				}
-				p.store.Add(Request.pkg, &Package{name: Request.pkg, dependencies: sliceToMap(Request.dependencies), dependents: make(map[string]interface{})})
-				_, err := conn.Write([]byte("OK\n"))
+		if !success {
+			conn.Write([]byte(ResponseError + "\n"))
+			continue
+		}
 
-				if err != nil {
-					//TODO do something
-				}
-				continue
-			}
-
-			if Request.command == "QUERY" {
-				if p.store.find(Request.pkg) {
-					_, err := conn.Write([]byte("OK\n"))
-					if err != nil {
-						//TODO something
-					}
-					continue
-				}
+		if Request.command == "INDEX" {
+			if len(Request.dependencies) > 0 && !p.store.find(Request.dependencies...) {
+				//could not find all dependencies
 				conn.Write([]byte("FAIL\n"))
 				continue
 			}
+			p.store.Add(Request.pkg, &Package{name: Request.pkg, dependencies: sliceToMap(Request.dependencies), dependents: make(map[string]interface{})})
+			_, err := conn.Write([]byte("OK\n"))
 
-			if Request.command == "REMOVE" {
-				pkg, ok := p.store.Get(Request.pkg)
-				if !ok {
-					_, err := conn.Write([]byte("OK\n"))
-					if err != nil {
-					}
-					continue
-				}
+			if err != nil {
+				//TODO do something
+			}
+			continue
+		}
 
-				if len(pkg.dependents) > 0 && p.store.find(mapKeys(pkg.dependents)...) {
-					_, err := conn.Write([]byte("FAIL\n"))
-					if err != nil {
-					}
-					continue
+		if Request.command == "QUERY" {
+			if p.store.find(Request.pkg) {
+				_, err := conn.Write([]byte("OK\n"))
+				if err != nil {
+					//TODO something
 				}
+				continue
+			}
+			conn.Write([]byte("FAIL\n"))
+			continue
+		}
 
-				if p.store.Remove(Request.pkg) {
-					//REMOVE pkg as a dependent
-					//dependencies := pkg.dependencies
-					//p.removeDependents(mapKeys(dependencies), Request.pkg)
-					_, err := conn.Write([]byte("OK\n"))
-					if err != nil {
-					}
-					continue
+		if Request.command == "REMOVE" {
+			pkg, ok := p.store.Get(Request.pkg)
+			if !ok {
+				_, err := conn.Write([]byte("OK\n"))
+				if err != nil {
 				}
+				continue
+			}
+
+			if len(pkg.dependents) > 0 && p.store.find(mapKeys(pkg.dependents)...) {
 				_, err := conn.Write([]byte("FAIL\n"))
 				if err != nil {
 				}
 				continue
 			}
-		case <-timer.C:
-			conn.Close()
-			return
+
+			if p.store.Remove(Request.pkg) {
+				//REMOVE pkg as a dependent
+				//dependencies := pkg.dependencies
+				//p.removeDependents(mapKeys(dependencies), Request.pkg)
+				_, err := conn.Write([]byte("OK\n"))
+				if err != nil {
+				}
+				continue
+			}
+			_, err := conn.Write([]byte("FAIL\n"))
+			if err != nil {
+			}
+			continue
 		}
 	}
-}
 
-func (p *PackageIndexer) receiveRequest(conn net.Conn) {
-	timer := time.NewTimer(10 * time.Second)
-	go p.handleRequest(conn, timer)
-	for {
-		request, _ := bufio.NewReader(conn).ReadString('\n')
-		p.reqChan <- request
-		timer.Reset(10 * time.Second)
-	}
 }
 
 func (m *MapStore) addDependents(packages []string, dependent string) {
