@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"log"
 	"net"
 	"strings"
@@ -15,55 +14,43 @@ const (
 
 // PackageStore is the interface for storing packages
 type PackageStore interface {
-	Add(string, *Package) bool
-	Get(string) (*Package, bool)
-	Remove(string) bool
+	/*	Add(string, *Package) bool
+		Get(string) (*Package, bool)
+		Remove(string) bool*/
 	find(...string) bool
 }
 
-func NewMapStore() *MapStore {
-	return &MapStore{
-		m:     &sync.RWMutex{},
-		store: make(map[string]*Package),
-	}
-}
-
-type MapStore struct {
-	m     *sync.RWMutex
-	store map[string]*Package
-}
-
-func (m *MapStore) Add(name string, pkg *Package) bool {
-	m.m.Lock()
-	defer m.m.Unlock()
-	if _, ok := m.store[name]; ok {
+func (p *PackageIndexer) Add(name string, pkg *Package) bool {
+	p.m.Lock()
+	defer p.m.Unlock()
+	if _, ok := p.store[name]; ok {
 		return ok
 	}
-	m.store[name] = pkg
-	m.addDependents(mapKeys(pkg.dependencies), name)
+	p.store[name] = pkg
+	p.addDependents(mapKeys(pkg.dependencies), name)
 	return true
 }
 
-func (m *MapStore) Get(name string) (*Package, bool) {
-	m.m.RLock()
-	defer m.m.RUnlock()
-	p, ok := m.store[name]
-	return p, ok
+func (p *PackageIndexer) Get(name string) (*Package, bool) {
+	p.m.RLock()
+	defer p.m.RUnlock()
+	pkg, ok := p.store[name]
+	return pkg, ok
 }
 
-func (m *MapStore) Remove(name string) bool {
-	m.m.Lock()
-	defer m.m.Unlock()
-	if _, ok := m.store[name]; !ok {
+func (p *PackageIndexer) Remove(name string) bool {
+	p.m.Lock()
+	defer p.m.Unlock()
+	if _, ok := p.store[name]; !ok {
 		return true
 	}
 	//check dependents
-	p, _ := m.store[name]
-	if m.find(mapKeys(p.dependents)...) {
+	pkg, _ := p.store[name]
+	if p.find(mapKeys(pkg.dependents)...) {
 		return false
 	}
-	delete(m.store, name)
-	m.removeDependents(mapKeys(p.dependencies), name)
+	delete(p.store, name)
+	p.removeDependents(mapKeys(pkg.dependencies), name)
 	return true
 }
 
@@ -81,18 +68,18 @@ type Request struct {
 
 func main() {
 	p := &PackageIndexer{
-		store:   NewMapStore(),
 		conChan: make(chan net.Conn, 10),
+		m:       &sync.RWMutex{},
+		store:   make(map[string]*Package),
 	}
 	p.listenAndServe()
 }
 
 type PackageIndexer struct {
-	store   PackageStore
+	m       *sync.RWMutex
 	conChan chan net.Conn
+	store   map[string]*Package
 }
-
-//TODO rate limit
 
 func (p *PackageIndexer) listenAndServe() {
 	ln, err := net.Listen("tcp", ":8080")
@@ -103,7 +90,6 @@ func (p *PackageIndexer) listenAndServe() {
 	go func() {
 		for {
 			conn := <-p.conChan
-			fmt.Println("pulled off of the channel")
 			go p.handleRequest(conn)
 		}
 	}()
@@ -113,9 +99,7 @@ func (p *PackageIndexer) listenAndServe() {
 		if err != nil {
 			log.Printf("error accepting connection: %s\n", err.Error())
 		}
-		fmt.Println("adding to the channel!!")
 		p.conChan <- conn
-		fmt.Println("added to the channel")
 	}
 }
 
@@ -149,12 +133,12 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 		}
 
 		if Request.command == "INDEX" {
-			if len(Request.dependencies) > 0 && !p.store.find(Request.dependencies...) {
+			if len(Request.dependencies) > 0 && !p.find(Request.dependencies...) {
 				//could not find all dependencies
 				conn.Write([]byte("FAIL\n"))
 				continue
 			}
-			p.store.Add(Request.pkg, &Package{name: Request.pkg, dependencies: sliceToMap(Request.dependencies), dependents: make(map[string]interface{})})
+			p.Add(Request.pkg, &Package{name: Request.pkg, dependencies: sliceToMap(Request.dependencies), dependents: make(map[string]interface{})})
 			_, err := conn.Write([]byte("OK\n"))
 
 			if err != nil {
@@ -164,7 +148,7 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 		}
 
 		if Request.command == "QUERY" {
-			if p.store.find(Request.pkg) {
+			if p.find(Request.pkg) {
 				_, err := conn.Write([]byte("OK\n"))
 				if err != nil {
 					//TODO something
@@ -176,7 +160,7 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 		}
 
 		if Request.command == "REMOVE" {
-			pkg, ok := p.store.Get(Request.pkg)
+			pkg, ok := p.Get(Request.pkg)
 			if !ok {
 				_, err := conn.Write([]byte("OK\n"))
 				if err != nil {
@@ -184,17 +168,14 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 				continue
 			}
 
-			if len(pkg.dependents) > 0 && p.store.find(mapKeys(pkg.dependents)...) {
+			if len(pkg.dependents) > 0 && p.find(mapKeys(pkg.dependents)...) {
 				_, err := conn.Write([]byte("FAIL\n"))
 				if err != nil {
 				}
 				continue
 			}
 
-			if p.store.Remove(Request.pkg) {
-				//REMOVE pkg as a dependent
-				//dependencies := pkg.dependencies
-				//p.removeDependents(mapKeys(dependencies), Request.pkg)
+			if p.Remove(Request.pkg) {
 				_, err := conn.Write([]byte("OK\n"))
 				if err != nil {
 				}
@@ -209,9 +190,9 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 
 }
 
-func (m *MapStore) addDependents(packages []string, dependent string) {
+func (p *PackageIndexer) addDependents(packages []string, dependent string) {
 	for _, pkg := range packages {
-		currentPackage, ok := m.store[pkg]
+		currentPackage, ok := p.store[pkg]
 		if !ok {
 			//something went very wrong
 		}
@@ -219,9 +200,9 @@ func (m *MapStore) addDependents(packages []string, dependent string) {
 	}
 }
 
-func (m *MapStore) removeDependents(packages []string, dependent string) {
+func (p *PackageIndexer) removeDependents(packages []string, dependent string) {
 	for _, dep := range packages {
-		pkg, ok := m.store[dep]
+		pkg, ok := p.store[dep]
 		if !ok {
 			//something went very wrong
 		}
@@ -229,15 +210,15 @@ func (m *MapStore) removeDependents(packages []string, dependent string) {
 	}
 }
 
-func (m *MapStore) find(pkgs ...string) bool {
+func (p *PackageIndexer) find(pkgs ...string) bool {
 	if len(pkgs) == 0 {
 		return false
 	}
-	if len(m.store) == 0 {
+	if len(p.store) == 0 {
 		return false
 	}
 	for _, pkg := range pkgs {
-		if _, ok := m.store[pkg]; !ok {
+		if _, ok := p.store[pkg]; !ok {
 			return false
 		}
 	}
