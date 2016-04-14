@@ -1,0 +1,35 @@
+#!/bin/bash -e
+
+docker build -t package-indexer:latest .
+echo "running docker image"
+dockerid=`docker run -d --publish 8080:8080 package-indexer:latest --name integration-test --rm package-indexer`
+function cleanup {
+  echo "killing docker container"
+  docker kill $dockerid
+}
+trap cleanup EXIT
+
+ip=$1
+
+echo "running unit tests"
+docker exec $dockerid /bin/bash -c "cd /go/src/github.com/john-cai/package-indexer && ./bin/test"
+
+if [ $? -ne 0 ]
+then
+	echo "unit tests failed..."
+fi
+
+echo "running integration test"
+for i in `seq 1 10`
+do
+	./test-suite/test-suite -concurrency 100 -seed 1 -ip $ip
+	if [ $? -ne 0 ]
+	then
+		echo "failed..."
+		exit 1
+	fi
+done
+
+echo "All tests passed"
+
+
