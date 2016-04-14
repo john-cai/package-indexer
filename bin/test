@@ -1,0 +1,11 @@
+#!/bin/bash -e
+
+# Get repo root by sub-shelling and getting the parent directory of this script
+DIR=$( cd $(dirname $0)/.. && pwd )
+
+echo "Running go vet..."
+go vet ./...
+echo "go vet complete"
+
+echo "Running unit tests..."
+go test -race -v github.com/john-cai/package-indexer/server

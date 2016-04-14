@@ -1,0 +1,7 @@
+#!/bin/bash -e
+
+DIR=$( cd $(dirname $0)/.. && pwd)
+cd $DIR/test-suite
+
+echo "building test suite..."
+go build -o test-suite
