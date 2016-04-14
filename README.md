@@ -32,6 +32,8 @@ then run the ./docker-test [ip of docker machine]
 ./docker-test 192.168.100.99
 ```
 
+this will run the unit tests, and an integration test that points the test harness at the docker container. The script runs the test harness 10 times with seed 1..10, and with the concurrency factor of 100
+
 # design rationale
 The way I designed this system was to have a main index by package name of all of the packages, and for each package to maintain an index of its dependents and also its dependencies. That way, whenever we need to remove a package we can take a look at its list of dependent packages.
 
