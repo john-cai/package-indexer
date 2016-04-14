@@ -9,7 +9,7 @@ docker build -t package-indexer:latest .
 then you can run the server with
 
 ```
-docker run -d --publish 8080:8080 package-indexser:latest
+docker run -d --publish 8080:8080 package-indexer:latest
 ```
 there are two environment variables that are relevant
 
