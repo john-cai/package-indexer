@@ -135,6 +135,7 @@ func (p *PackageIndexer) ListenAndServe() {
 	if err != nil {
 		log.Fatalf("could not start tcp server: %s\n", err.Error())
 	}
+	// use a buffered channel to rate limit connections
 	go func() {
 		for {
 			conn := <-p.conChan
@@ -174,6 +175,8 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 		request, err := bufio.NewReader(conn).ReadString('\n')
 		//METRICS: start request handle timer
 		//METRICS: defer calculate total time for request
+
+		// If we have an error, then we need to close the connection
 		if err != nil {
 			log.Printf("error reading from client %s", err.Error())
 			//METRICS: increment connection closed count
@@ -195,6 +198,7 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 			continue
 		}
 
+		// Handle valid commands
 		if Request.command == CmdIndex {
 			//METRICS: increment command index count
 			if !p.Add(&Package{
@@ -261,6 +265,7 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 	}
 }
 
+// for every package in 'packages', 'dependent' will not be a dependent
 func (p *PackageIndexer) addDependents(packages []string, dependent string) {
 	for _, pkg := range packages {
 		currentPackage, ok := p.store.Get(pkg)
@@ -271,6 +276,7 @@ func (p *PackageIndexer) addDependents(packages []string, dependent string) {
 	}
 }
 
+// for every package in 'packages', 'dependent' will no longer be a dependent
 func (p *PackageIndexer) removeDependents(packages []string, dependent string) {
 	for _, dep := range packages {
 		pkg, ok := p.store.Get(dep)
@@ -281,6 +287,7 @@ func (p *PackageIndexer) removeDependents(packages []string, dependent string) {
 	}
 }
 
+// search function to find a package in the package store
 func (p *PackageIndexer) find(pkgs ...string) bool {
 	if len(pkgs) == 0 {
 		return false
@@ -296,6 +303,7 @@ func (p *PackageIndexer) find(pkgs ...string) bool {
 	return true
 }
 
+// parses the request string
 func parseRequestString(s string) (*Request, bool) {
 	splitRequest := strings.Split(s, "|")
 	if len(splitRequest) != 3 {

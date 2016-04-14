@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// Test adding packages
 func TestAdd(t *testing.T) {
 	m := NewMapStore()
 	p := NewPackageIndexer(1, m, 8080)
@@ -57,6 +58,7 @@ func TestAdd(t *testing.T) {
 	}
 }
 
+// Test querying packages
 func TestQuery(t *testing.T) {
 	m := NewMapStore()
 	p := NewPackageIndexer(1, m, 8080)
@@ -89,6 +91,7 @@ func TestQuery(t *testing.T) {
 	}
 }
 
+// Test removing packages
 func TestRemove(t *testing.T) {
 	m := NewMapStore()
 	p := NewPackageIndexer(1, m, 8080)
@@ -126,6 +129,7 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+// Testing concurrent add, making sure that no dataraces occur
 func TestConcurrentAdd(t *testing.T) {
 	m := NewMapStore()
 	p := NewPackageIndexer(1, m, 8080)
@@ -194,6 +198,7 @@ func addWithWaitGroup(p *PackageIndexer, pkg *Package, wg *sync.WaitGroup) {
 	wg.Done()
 }
 
+// Testing concurrent query and remove, making sure that no dataraces occur
 func TestConcurrentQueryRemove(t *testing.T) {
 	m := NewMapStore()
 	p := NewPackageIndexer(1, m, 8080)
@@ -262,6 +267,7 @@ func TestConcurrentQueryRemove(t *testing.T) {
 	wg.Wait()
 }
 
+// Testing the request parsing
 func TestParseRequestString(t *testing.T) {
 	tests := []struct {
 		request  string
@@ -320,6 +326,7 @@ func TestParseRequestString(t *testing.T) {
 	}
 }
 
+// Testing the mapKeys util function
 func TestMapKeys(t *testing.T) {
 	tests := []struct {
 		m        map[string]interface{}
@@ -346,6 +353,7 @@ func TestMapKeys(t *testing.T) {
 	}
 }
 
+// Testing the sliceToMap util function
 func TestSliceToMap(t *testing.T) {
 	tests := []struct {
 		expected map[string]interface{}
