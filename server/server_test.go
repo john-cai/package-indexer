@@ -347,10 +347,43 @@ func TestMapKeys(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if !reflect.DeepEqual(mapKeys(test.m), test.expected) {
+		if !testEq(mapKeys(test.m), test.expected, t) {
 			t.Errorf("expected %v, got %v", test.expected, mapKeys(test.m))
 		}
 	}
+}
+
+func testEq(a, b []string, t *testing.T) bool {
+
+	if a == nil && b == nil {
+		return true
+	}
+
+	if a == nil || b == nil {
+		t.Log("a or b are nill")
+		return false
+	}
+
+	var found bool
+	if len(a) != len(b) {
+
+		t.Log("a and b are not the same length")
+		return false
+	}
+
+	for _, v1 := range a {
+		for _, v2 := range b {
+			if v1 == v2 {
+				found = true
+			}
+		}
+		if !found {
+			return false
+		}
+		found = false
+	}
+
+	return true
 }
 
 // Testing the sliceToMap util function
