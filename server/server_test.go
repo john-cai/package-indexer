@@ -41,7 +41,7 @@ func TestAdd(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		newPkg := &Package{name: test.name, dependents: make(map[string]interface{}), dependencies: sliceToMap(test.dependencies)}
+		newPkg := &Package{name: test.name, dependents: make(map[string]interface{}), dependencies: test.dependencies}
 		success := p.Add(newPkg)
 		pkg := m.m[test.name]
 		if success != test.success {
@@ -63,7 +63,7 @@ func TestQuery(t *testing.T) {
 	m := NewMapStore()
 	p := NewPackageIndexer(1, m, 8080)
 
-	p.Add(&Package{name: "b", dependencies: make(map[string]interface{}), dependents: make(map[string]interface{})})
+	p.Add(&Package{name: "b", dependencies: make([]string, 0), dependents: make(map[string]interface{})})
 	tests := []struct {
 		request  string
 		expected bool
@@ -96,8 +96,8 @@ func TestRemove(t *testing.T) {
 	m := NewMapStore()
 	p := NewPackageIndexer(1, m, 8080)
 
-	p.Add(&Package{name: "b", dependencies: make(map[string]interface{}), dependents: make(map[string]interface{})})
-	p.Add(&Package{name: "c", dependencies: map[string]interface{}{"b": struct{}{}}, dependents: make(map[string]interface{})})
+	p.Add(&Package{name: "b", dependencies: []string{}, dependents: make(map[string]interface{})})
+	p.Add(&Package{name: "c", dependencies: []string{"b"}, dependents: make(map[string]interface{})})
 	tests := []struct {
 		request  string
 		expected bool
@@ -136,22 +136,22 @@ func TestConcurrentAdd(t *testing.T) {
 
 	a := &Package{
 		name:         "a",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	b := &Package{
 		name:         "b",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	c := &Package{
 		name:         "c",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	d := &Package{
 		name:         "d",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	p.Add(a)
@@ -161,17 +161,17 @@ func TestConcurrentAdd(t *testing.T) {
 
 	e1 := &Package{
 		name:         "e",
-		dependencies: map[string]interface{}{"a": struct{}{}, "b": struct{}{}},
+		dependencies: []string{"a", "b"},
 		dependents:   map[string]interface{}{},
 	}
 	e2 := &Package{
 		name:         "e",
-		dependencies: map[string]interface{}{"b": struct{}{}, "c": struct{}{}},
+		dependencies: []string{"b", "c"},
 		dependents:   map[string]interface{}{},
 	}
 	e3 := &Package{
 		name:         "e",
-		dependencies: map[string]interface{}{"c": struct{}{}, "d": struct{}{}},
+		dependencies: []string{"c", "d"},
 		dependents:   map[string]interface{}{},
 	}
 	wg := sync.WaitGroup{}
@@ -205,22 +205,22 @@ func TestConcurrentQueryRemove(t *testing.T) {
 
 	a := &Package{
 		name:         "a",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	b := &Package{
 		name:         "b",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	c := &Package{
 		name:         "c",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	d := &Package{
 		name:         "d",
-		dependencies: map[string]interface{}{},
+		dependencies: []string{},
 		dependents:   map[string]interface{}{},
 	}
 	wg := sync.WaitGroup{}
