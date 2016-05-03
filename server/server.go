@@ -67,7 +67,7 @@ func NewPackageIndexer(limit int, store PackageStore, port int) *PackageIndexer 
 func (p *PackageIndexer) Add(pkg *Package) bool {
 	p.m.Lock()
 	defer p.m.Unlock()
-	if len(pkg.dependencies) > 0 && !p.find(mapKeys(pkg.dependencies)...) {
+	if len(pkg.dependencies) > 0 && !p.find(pkg.dependencies...) {
 		return false
 	}
 
@@ -75,7 +75,7 @@ func (p *PackageIndexer) Add(pkg *Package) bool {
 		return true
 	}
 	p.store.Put(pkg)
-	p.addDependents(mapKeys(pkg.dependencies), pkg.name)
+	p.addDependents(pkg.dependencies, pkg.name)
 	return true
 }
 
@@ -100,7 +100,7 @@ func (p *PackageIndexer) Remove(name string) bool {
 		return false
 	}
 	p.store.Delete(name)
-	p.removeDependents(mapKeys(pkg.dependencies), name)
+	p.removeDependents(pkg.dependencies, name)
 	return true
 }
 
@@ -113,7 +113,7 @@ func (p *PackageIndexer) Query(name string) bool {
 type Package struct {
 	name         string
 	dependents   map[string]interface{}
-	dependencies map[string]interface{}
+	dependencies []string
 }
 
 type Request struct {
@@ -203,7 +203,7 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 			//METRICS: increment command index count
 			if !p.Add(&Package{
 				name:         Request.pkg,
-				dependencies: sliceToMap(Request.dependencies),
+				dependencies: Request.dependencies,
 				dependents:   make(map[string]interface{}),
 			}) {
 				conn.Write([]byte(fmt.Sprintf("%s\n", ResponseFail)))
