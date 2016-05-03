@@ -8,4 +8,5 @@ go vet ./...
 echo "go vet complete"
 
 echo "Running unit tests..."
+export GOMAXPROCS=4
 go test -race -v github.com/john-cai/package-indexer/server
