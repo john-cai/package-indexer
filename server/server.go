@@ -90,10 +90,15 @@ func (p *PackageIndexer) Get(name string) (*Package, bool) {
 func (p *PackageIndexer) Remove(name string) bool {
 	p.m.Lock()
 	defer p.m.Unlock()
+
 	pkg, ok := p.store.Get(name)
 	if !ok {
 		return true
 	}
+	if len(pkg.dependents) > 0 && p.find(mapKeys(pkg.dependents)...) {
+		return false
+	}
+
 	//check dependents
 
 	if p.find(mapKeys(pkg.dependents)...) {
@@ -233,18 +238,10 @@ func (p *PackageIndexer) handleRequest(conn net.Conn) {
 		}
 
 		if Request.command == CmdRemove {
-			pkg, ok := p.Get(Request.pkg)
+			_, ok := p.Get(Request.pkg)
 			if !ok {
 				_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseOK)))
 				if err != nil {
-				}
-				continue
-			}
-
-			if len(pkg.dependents) > 0 && p.find(mapKeys(pkg.dependents)...) {
-				_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseFail)))
-				if err != nil {
-					log.Printf("error writing to connection %s", err.Error())
 				}
 				continue
 			}
