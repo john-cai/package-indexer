@@ -1,12 +1,13 @@
 package server
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"net"
 	"strings"
 	"sync"
+
+	"github.com/pborman/uuid"
 )
 
 const (
@@ -25,11 +26,32 @@ type PackageStore interface {
 	Delete(string)
 	Put(*Package)
 	Size() int
+	Lock()
+	Unlock()
+	RLock()
+	RUnlock()
 }
 
 // mapStore is an implementation of PackageStore using a standard library map
 type mapStore struct {
+	l sync.RWMutex
 	m map[string]*Package
+}
+
+func (m *mapStore) Lock() {
+	m.l.Lock()
+}
+
+func (m *mapStore) Unlock() {
+	m.l.Unlock()
+}
+
+func (m *mapStore) RLock() {
+	m.l.RLock()
+}
+
+func (m *mapStore) RUnlock() {
+	m.l.RUnlock()
 }
 
 func (m *mapStore) Get(p string) (*Package, bool) {
@@ -55,64 +77,17 @@ func NewMapStore() *mapStore {
 	}
 }
 
-func NewPackageIndexer(limit int, store PackageStore, port int) *PackageIndexer {
-	return &PackageIndexer{
-		conChan: make(chan net.Conn, limit),
-		m:       &sync.RWMutex{},
-		store:   store,
-		port:    port,
+func NewPackageIndexer(rateLimit, numWorkers int, store PackageStore, port int) *PackageIndexer {
+
+	p := &PackageIndexer{
+		conChan:    make(chan net.Conn, rateLimit),
+		workerChan: make(chan *Worker, numWorkers),
+		port:       port,
 	}
-}
-
-func (p *PackageIndexer) Add(pkg *Package) bool {
-	p.m.Lock()
-	defer p.m.Unlock()
-	if len(pkg.dependencies) > 0 && !p.find(pkg.dependencies...) {
-		return false
+	for i := 0; i < numWorkers; i++ {
+		p.workerChan <- &Worker{id: uuid.New(), store: store, workerChan: p.workerChan}
 	}
-
-	if _, ok := p.store.Get(pkg.name); ok {
-		return true
-	}
-	p.store.Put(pkg)
-	p.addDependents(pkg.dependencies, pkg.name)
-	return true
-}
-
-func (p *PackageIndexer) Get(name string) (*Package, bool) {
-	p.m.RLock()
-	defer p.m.RUnlock()
-	var ok bool
-	pkg, ok := p.store.Get(name)
-	return pkg, ok
-}
-
-func (p *PackageIndexer) Remove(name string) bool {
-	p.m.Lock()
-	defer p.m.Unlock()
-
-	pkg, ok := p.store.Get(name)
-	if !ok {
-		return true
-	}
-	if len(pkg.dependents) > 0 && p.find(mapKeys(pkg.dependents)...) {
-		return false
-	}
-
-	//check dependents
-
-	if p.find(mapKeys(pkg.dependents)...) {
-		return false
-	}
-	p.store.Delete(name)
-	p.removeDependents(pkg.dependencies, name)
-	return true
-}
-
-func (p *PackageIndexer) Query(name string) bool {
-	p.m.RLock()
-	defer p.m.RUnlock()
-	return p.find(name)
+	return p
 }
 
 type Package struct {
@@ -128,10 +103,10 @@ type Request struct {
 }
 
 type PackageIndexer struct {
-	m       *sync.RWMutex
-	conChan chan net.Conn
-	store   PackageStore
-	port    int
+	conChan    chan net.Conn
+	port       int
+	workers    []Worker
+	workerChan chan *Worker
 }
 
 func (p *PackageIndexer) ListenAndServe() {
@@ -143,8 +118,12 @@ func (p *PackageIndexer) ListenAndServe() {
 	// use a buffered channel to rate limit connections
 	go func() {
 		for {
+			worker := <-p.workerChan
 			conn := <-p.conChan
-			go p.handleRequest(conn)
+			go func() {
+				worker.handleRequest(conn)
+				p.workerChan <- worker
+			}()
 		}
 	}()
 
@@ -173,131 +152,6 @@ func mapKeys(m map[string]interface{}) []string {
 		s = append(s, k)
 	}
 	return s
-}
-
-func (p *PackageIndexer) handleRequest(conn net.Conn) {
-	for {
-		request, err := bufio.NewReader(conn).ReadString('\n')
-		//METRICS: start request handle timer
-		//METRICS: defer calculate total time for request
-
-		// If we have an error, then we need to close the connection
-		if err != nil {
-			log.Printf("error reading from client %s", err.Error())
-			//METRICS: increment connection closed count
-			err := conn.Close()
-
-			if err != nil {
-				log.Printf("error closing connection %s", err.Error())
-			}
-			return
-		}
-
-		Request, success := parseRequestString(request)
-
-		if !success {
-			_, err := conn.Write([]byte(ResponseError + "\n"))
-			if err != nil {
-				log.Printf("error writing to connection %s", err.Error())
-			}
-			continue
-		}
-
-		// Handle valid commands
-		if Request.command == CmdIndex {
-			//METRICS: increment command index count
-			if !p.Add(&Package{
-				name:         Request.pkg,
-				dependencies: Request.dependencies,
-				dependents:   make(map[string]interface{}),
-			}) {
-				conn.Write([]byte(fmt.Sprintf("%s\n", ResponseFail)))
-				continue
-			}
-			_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseOK)))
-
-			if err != nil {
-				log.Printf("error writing to connection %s", err.Error())
-			}
-			continue
-		}
-
-		if Request.command == CmdQuery {
-			if p.Query(Request.pkg) {
-				_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseOK)))
-				if err != nil {
-					log.Printf("error writing to connection %s", err.Error())
-				}
-				continue
-			}
-			_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseFail)))
-			if err != nil {
-				log.Printf("error writing to connection %s", err.Error())
-			}
-			continue
-		}
-
-		if Request.command == CmdRemove {
-			_, ok := p.Get(Request.pkg)
-			if !ok {
-				_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseOK)))
-				if err != nil {
-				}
-				continue
-			}
-
-			if p.Remove(Request.pkg) {
-				_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseOK)))
-				if err != nil {
-					log.Printf("error writing to connection %s", err.Error())
-				}
-				continue
-			}
-			_, err := conn.Write([]byte(fmt.Sprintf("%s\n", ResponseFail)))
-			if err != nil {
-				log.Printf("error writing to connection %s", err.Error())
-			}
-			continue
-		}
-	}
-}
-
-// for every package in 'packages', 'dependent' will not be a dependent
-func (p *PackageIndexer) addDependents(packages []string, dependent string) {
-	for _, pkg := range packages {
-		currentPackage, ok := p.store.Get(pkg)
-		if !ok {
-			log.Fatalf("missing package %s", pkg)
-		}
-		currentPackage.dependents[dependent] = struct{}{}
-	}
-}
-
-// for every package in 'packages', 'dependent' will no longer be a dependent
-func (p *PackageIndexer) removeDependents(packages []string, dependent string) {
-	for _, dep := range packages {
-		pkg, ok := p.store.Get(dep)
-		if !ok {
-			log.Fatalf("missing package %s", pkg)
-		}
-		delete(pkg.dependents, dependent)
-	}
-}
-
-// search function to find a package in the package store
-func (p *PackageIndexer) find(pkgs ...string) bool {
-	if len(pkgs) == 0 {
-		return false
-	}
-	if p.store.Size() == 0 {
-		return false
-	}
-	for _, pkg := range pkgs {
-		if _, ok := p.store.Get(pkg); !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // parses the request string

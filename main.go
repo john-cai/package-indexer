@@ -41,6 +41,6 @@ func main() {
 		}
 	}
 
-	p := server.NewPackageIndexer(connectionLimit, server.NewMapStore(), port)
+	p := server.NewPackageIndexer(connectionLimit, 1000, server.NewMapStore(), port)
 	p.ListenAndServe()
 }
